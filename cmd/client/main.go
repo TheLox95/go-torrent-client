@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/TheLox95/go-torrent-client/pkg/downloadManager"
+	peermanager "github.com/TheLox95/go-torrent-client/pkg/peerManager"
 
 	bencode "github.com/jackpal/bencode-go"
 )
@@ -34,6 +35,22 @@ type bencodeInfo struct {
 	Name        string `bencode:"name"`
 }
 
+func (i *bencodeInfo) splitPieceHashes() ([][20]byte, error) {
+	hashLen := 20 // Length of SHA-1 hash
+	buf := []byte(i.Pieces)
+	if len(buf)%hashLen != 0 {
+		err := fmt.Errorf("Received malformed pieces of length %d", len(buf))
+		return nil, err
+	}
+	numHashes := len(buf) / hashLen
+	hashes := make([][20]byte, numHashes)
+
+	for i := 0; i < numHashes; i++ {
+		copy(hashes[i][:], buf[i*hashLen:(i+1)*hashLen])
+	}
+	return hashes, nil
+}
+
 type bencodeTorrent struct {
 	Announce string      `bencode:"announce"`
 	Info     bencodeInfo `bencode:"info"`
@@ -44,19 +61,10 @@ type bencodeTrackerResp struct {
 	Peers    string `bencode:"peers"`
 }
 
-func main() {
-	torrentPath := "./debian.torrent"
+var peerID [20]byte
+var _, err = rand.Read(peerID[:])
 
-	file, err := os.Open(torrentPath)
-	if err != nil {
-		fmt.Println("Could not read torrent file")
-		os.Exit(1)
-	}
-	defer file.Close()
-
-	bto := bencodeTorrent{}
-	err = bencode.Unmarshal(file, &bto)
-
+func getPeerList(bto *bencodeTorrent) (peers []downloadManager.Peer, infoHash [20]byte) {
 	base, err := url.Parse(bto.Announce)
 	if err != nil {
 		fmt.Println("Could not parse Announce")
@@ -70,10 +78,8 @@ func main() {
 		fmt.Println("Could not Marshal encodeInfo")
 		os.Exit(1)
 	}
-	infoHash := sha1.Sum(buf.Bytes())
 
-	var peerID [20]byte
-	_, err = rand.Read(peerID[:])
+	infoHash = sha1.Sum(buf.Bytes())
 
 	Port := 6881
 
@@ -89,7 +95,6 @@ func main() {
 	base.RawQuery = params.Encode()
 
 	url := base.String()
-
 	c := &http.Client{Timeout: 15 * time.Second}
 	resp, err := c.Get(url)
 	if err != nil {
@@ -104,7 +109,6 @@ func main() {
 		fmt.Println("Could not parse response")
 		os.Exit(1)
 	}
-
 	peersBin := []byte(trackerResp.Peers)
 	const peerSize = 6 // 4 for IP, 2 for port
 	totalOfPeers := len(peersBin) / peerSize
@@ -112,14 +116,57 @@ func main() {
 		fmt.Println("Could not parse response")
 		os.Exit(1)
 	}
-	peers := make([]downloadManager.Peer, totalOfPeers)
+	fmt.Println("Peer amount: ", totalOfPeers)
+	peersSlice := make([]downloadManager.Peer, totalOfPeers)
 	for i := 0; i < totalOfPeers; i++ {
 		offset := i * peerSize
-		peers[i].IP = net.IP(peersBin[offset : offset+4])
-		peers[i].Port = binary.BigEndian.Uint16(peersBin[offset+4 : offset+6])
+		peersSlice[i].IP = net.IP(peersBin[offset : offset+4])
+		peersSlice[i].Port = binary.BigEndian.Uint16(peersBin[offset+4 : offset+6])
+	}
+	return peersSlice, infoHash
+}
+
+func main() {
+	torrentPath := "./debian.torrent"
+
+	file, err := os.Open(torrentPath)
+	if err != nil {
+		fmt.Println("Could not read torrent file")
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	bto := bencodeTorrent{}
+	err = bencode.Unmarshal(file, &bto)
+	if err != nil {
+		fmt.Println("Could not parse torrent file", err)
+		os.Exit(1)
 	}
 
-	hashLen := 20 // Length of SHA-1 hash
+	peers, infoHash := getPeerList(&bto)
+
+	peerManager := peermanager.PeerManager{
+		Client: &downloadManager.ClientIdentifier{
+			PeerID:   peerID,
+			InfoHash: infoHash,
+		},
+	}
+	for p := 0; p < len(peers); p++ {
+		peer := peers[p]
+		peerManager.Add(&peer)
+	}
+
+	fmt.Println(peerManager.TotalAvailableConnected())
+
+	fileBuffer := make([]byte, bto.Info.Length)
+	hashes, err := bto.Info.splitPieceHashes()
+	if err != nil {
+		fmt.Println("could not parce pieces hashes", err)
+		os.Exit(1)
+	}
+	peerManager.Download(fileBuffer, bto.Info.PieceLength, bto.Info.Length, hashes)
+
+	/*hashLen := 20 // Length of SHA-1 hash
 	piecesBuf := []byte(bto.Info.Pieces)
 	if len(piecesBuf)%hashLen != 0 {
 		fmt.Errorf("Received malformed pieces of length %d", len(piecesBuf))
@@ -135,7 +182,7 @@ func main() {
 
 	fileBuffer := make([]byte, bto.Info.Length)
 
-	for p := 0; p < totalOfPeers; p++ {
+	for p := 0; p < len(peers); p++ {
 		peer := peers[p]
 		downloadManager.ConnectToPeer(peer, infoHash, peerID, fileBuffer)
 	}
@@ -146,7 +193,7 @@ func main() {
 		// handle error
 	}
 
-	/*outFile, err := os.Create("./file.txt")
+	outFile, err := os.Create("./file.txt")
 	if err != nil {
 		fmt.Errorf("Could not create end file")
 		os.Exit(1)

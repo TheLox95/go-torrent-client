@@ -36,6 +36,54 @@ type PeerMessage struct {
 	Payload []byte
 }
 
+// PeerMessage stores ID and payload of a message
+type PeerMessageResponse struct {
+	c *net.Conn
+}
+
+func (r *PeerMessageResponse) Read() (*PeerMessage, error) {
+	msg, err := FromResponse(*r.c)
+	if err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
+func (r *PeerMessageResponse) ParsePiece(index int, pieceBuf []byte) (int, error) {
+	msg, err := r.Read()
+
+	if err != nil {
+		return 0, fmt.Errorf("Could not parse response message")
+	}
+
+	if msg == nil {
+		fmt.Printf("Message is nil\n")
+		return 0, nil
+	}
+
+	if msg.ID != MsgPiece {
+		fmt.Printf("Expected PIECE (ID %d), got ID %d\n", MsgPiece, msg.ID)
+		return 0, nil
+	}
+	if len(msg.Payload) < 8 {
+		return 0, fmt.Errorf("Payload too short. %d < 8", len(msg.Payload))
+	}
+	parsedIndex := int(binary.BigEndian.Uint32(msg.Payload[0:4]))
+	if parsedIndex != index {
+		return 0, fmt.Errorf("Expected index %d, got %d", index, parsedIndex)
+	}
+	begin := int(binary.BigEndian.Uint32(msg.Payload[4:8]))
+	if begin >= len(pieceBuf) {
+		return 0, fmt.Errorf("Begin offset too high. %d >= %d", begin, len(pieceBuf))
+	}
+	data := msg.Payload[8:]
+	if begin+len(data) > len(pieceBuf) {
+		return 0, fmt.Errorf("Data too long [%d] for offset %d with length %d", len(data), begin, len(pieceBuf))
+	}
+	copy(pieceBuf[begin:], data)
+	return len(pieceBuf), nil
+}
+
 func FromResponse(r io.Reader) (*PeerMessage, error) {
 	lengthBuf := make([]byte, 4)
 	_, err := io.ReadFull(r, lengthBuf)
@@ -63,7 +111,7 @@ func FromResponse(r io.Reader) (*PeerMessage, error) {
 	return &m, nil
 }
 
-func SendMessage(c net.Conn, id MessageID, payload []byte) (*PeerMessage, error) {
+func SendMessage(c net.Conn, id MessageID, payload []byte) (*PeerMessageResponse, error) {
 	length := uint32(len(payload) + 1) // +1 for id
 	buf := make([]byte, 4+length)
 	binary.BigEndian.PutUint32(buf[0:4], length)
@@ -75,33 +123,9 @@ func SendMessage(c net.Conn, id MessageID, payload []byte) (*PeerMessage, error)
 		return nil, err
 	}
 
-	msg, err := FromResponse(c)
-	if err != nil {
-		return nil, err
+	r := &PeerMessageResponse{
+		c: &c,
 	}
 
-	return msg, nil
-}
-
-func ParsePiece(index int, buf []byte, msg *PeerMessage) (int, error) {
-	if msg.ID != MsgPiece {
-		return 0, fmt.Errorf("Expected PIECE (ID %d), got ID %d", MsgPiece, msg.ID)
-	}
-	if len(msg.Payload) < 8 {
-		return 0, fmt.Errorf("Payload too short. %d < 8", len(msg.Payload))
-	}
-	parsedIndex := int(binary.BigEndian.Uint32(msg.Payload[0:4]))
-	if parsedIndex != index {
-		return 0, fmt.Errorf("Expected index %d, got %d", index, parsedIndex)
-	}
-	begin := int(binary.BigEndian.Uint32(msg.Payload[4:8]))
-	if begin >= len(buf) {
-		return 0, fmt.Errorf("Begin offset too high. %d >= %d", begin, len(buf))
-	}
-	data := msg.Payload[8:]
-	if begin+len(data) > len(buf) {
-		return 0, fmt.Errorf("Data too long [%d] for offset %d with length %d", len(data), begin, len(buf))
-	}
-	copy(buf[begin:], data)
-	return len(data), nil
+	return r, nil
 }
