@@ -13,7 +13,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/TheLox95/go-torrent-client/pkg/downloadManager"
+	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/ClientIdentifier"
+	"github.com/TheLox95/go-torrent-client/pkg/peer"
 	peermanager "github.com/TheLox95/go-torrent-client/pkg/peerManager"
 
 	bencode "github.com/jackpal/bencode-go"
@@ -64,7 +65,7 @@ type bencodeTrackerResp struct {
 var peerID [20]byte
 var _, err = rand.Read(peerID[:])
 
-func getPeerList(bto *bencodeTorrent) (peers []downloadManager.Peer, infoHash [20]byte) {
+func getPeerList(bto *bencodeTorrent) (peers []peer.Peer, infoHash [20]byte) {
 	base, err := url.Parse(bto.Announce)
 	if err != nil {
 		fmt.Println("Could not parse Announce")
@@ -117,7 +118,7 @@ func getPeerList(bto *bencodeTorrent) (peers []downloadManager.Peer, infoHash [2
 		os.Exit(1)
 	}
 	fmt.Println("Peer amount: ", totalOfPeers)
-	peersSlice := make([]downloadManager.Peer, totalOfPeers)
+	peersSlice := make([]peer.Peer, totalOfPeers)
 	for i := 0; i < totalOfPeers; i++ {
 		offset := i * peerSize
 		peersSlice[i].IP = net.IP(peersBin[offset : offset+4])
@@ -146,7 +147,7 @@ func main() {
 	peers, infoHash := getPeerList(&bto)
 
 	peerManager := peermanager.PeerManager{
-		Client: &downloadManager.ClientIdentifier{
+		Client: &clientidentifier.ClientIdentifier{
 			PeerID:   peerID,
 			InfoHash: infoHash,
 		},

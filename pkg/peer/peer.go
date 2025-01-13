@@ -1,8 +1,7 @@
-package downloadManager
+package peer
 
 import (
 	"bytes"
-	"crypto/sha1"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -11,16 +10,12 @@ import (
 	"strconv"
 	"time"
 
+	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/ClientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peerMessage"
 )
 
 // MaxBlockSize is the largest number of bytes a request can ask for
 const MaxBlockSize = 16384
-
-type ClientIdentifier struct {
-	PeerID   [20]byte
-	InfoHash [20]byte
-}
 
 type Peer struct {
 	IP   net.IP
@@ -41,7 +36,7 @@ func (p *Peer) CloseConnection() {
 func (p *Peer) IsConnected() bool {
 	return p.conn != nil
 }
-func (p *Peer) Connect(client *ClientIdentifier) error {
+func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 	peerUrl := net.JoinHostPort(p.IP.String(), strconv.Itoa(int(p.Port)))
 	if p.conn == nil {
 		peerConn, err := net.DialTimeout("tcp", peerUrl, 30*time.Second)
@@ -115,23 +110,6 @@ func (p *Peer) Connect(client *ClientIdentifier) error {
 		return errors.New("INTERESTED request failed")
 	}
 
-	return nil
-}
-
-func (t *Peer) CalculatePieceSize(index, pieceLength, torrentLength int) (size int) {
-	begin := index * pieceLength
-	end := begin + pieceLength
-	if end > torrentLength {
-		end = torrentLength
-	}
-	return end - begin
-}
-
-func (t *Peer) CheckIntegrity(pieceHash [20]byte, buf []byte) error {
-	sha1 := sha1.Sum(buf)
-	if !bytes.Equal(sha1[:], pieceHash[:]) {
-		return errors.New("failed integrity check")
-	}
 	return nil
 }
 
@@ -220,7 +198,3 @@ func ReadHandshake(r io.Reader) (string, [20]byte, [20]byte, error) {
 	return string(handshakeBuf[0:pstrlen]), infoHash, peerID, nil
 
 }
-
-//TODO
-// check which parts the peer has
-// keep track of all requested and non requested pieces

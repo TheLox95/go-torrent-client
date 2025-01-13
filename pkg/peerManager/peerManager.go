@@ -7,7 +7,9 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/TheLox95/go-torrent-client/pkg/downloadManager"
+	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/ClientIdentifier"
+	"github.com/TheLox95/go-torrent-client/pkg/peer"
+	"github.com/TheLox95/go-torrent-client/pkg/piece"
 )
 
 type PeerStatus int
@@ -20,13 +22,13 @@ const (
 )
 
 type TrackedPeer struct {
-	downloadManager.Peer
+	peer.Peer
 	status PeerStatus
 }
 
 type PeerManager struct {
 	peers  map[PeerID]TrackedPeer
-	Client *downloadManager.ClientIdentifier
+	Client *(clientidentifier.ClientIdentifier)
 }
 
 func (m *PeerManager) TotalAvailable() int {
@@ -59,7 +61,7 @@ func (m *PeerManager) Download(endFileBuf []byte, pieceLength, fileLength int, h
 				continue
 			}
 		}
-		pieceSize := peer.Peer.CalculatePieceSize(lastPieceIdxAsked, pieceLength, fileLength)
+		pieceSize := piece.CalculatePieceSize(lastPieceIdxAsked, pieceLength, fileLength)
 		for lastPieceIdxAsked < len(hashes) {
 
 			fmt.Printf("asking piece %d to peer %s of size %d\n", lastPieceIdxAsked, peer.Peer.GetID(), pieceSize)
@@ -76,7 +78,7 @@ func (m *PeerManager) Download(endFileBuf []byte, pieceLength, fileLength int, h
 
 				sha1 := sha1.Sum(pieceBuffer)
 				fmt.Println("piece num [", lastPieceIdxAsked, "] ", "pieceBuffer: ", sha1, " pieceHash: ", pieceHash)
-				err = peer.Peer.CheckIntegrity(pieceHash, pieceBuffer)
+				err = piece.CheckIntegrity(pieceHash, pieceBuffer)
 				if err != nil {
 					fmt.Printf("---piece integrity failed\n")
 					continue
@@ -88,7 +90,7 @@ func (m *PeerManager) Download(endFileBuf []byte, pieceLength, fileLength int, h
 	}
 }
 
-func (m *PeerManager) Add(p *downloadManager.Peer) {
+func (m *PeerManager) Add(p *peer.Peer) {
 	if m.peers == nil {
 		m.peers = make(map[PeerID]TrackedPeer)
 	}
@@ -113,3 +115,4 @@ func (m *PeerManager) SetStatus(id PeerID, status PeerStatus) (err error) {
 
 //TODO
 // Retry to connect to disconnected peer
+// call multiple pieces simultaneously
