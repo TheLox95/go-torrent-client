@@ -51,8 +51,14 @@ func (m *PeerManager) TotalAvailableConnected() int {
 	return total
 }
 
-func (m *PeerManager) Download(endFileBuf []byte, pieceLength, fileLength int, hashes [][20]byte) {
-	var lastPieceIdxAsked = 0
+func (m *PeerManager) Download(pieceObserver chan piece.Piece, pieceLength, fileLength int, hashes [][20]byte) {
+	hashesLen := len(hashes)
+	pieces := make([]piece.Piece, hashesLen)
+	for i := 0; i < hashesLen; i++ {
+		p := piece.Piece{Idx: i, Hash: hashes[i], Length: pieceLength, Buf: nil}
+		pieces[i] = p
+	}
+
 	for _, peer := range m.peers {
 		fmt.Printf("-----PEER [%s]-----\n", peer.Peer.GetID())
 		if !peer.Peer.IsConnected() {
@@ -61,30 +67,29 @@ func (m *PeerManager) Download(endFileBuf []byte, pieceLength, fileLength int, h
 				continue
 			}
 		}
-		pieceSize := piece.CalculatePieceSize(lastPieceIdxAsked, pieceLength, fileLength)
-		for lastPieceIdxAsked < len(hashes) {
 
-			fmt.Printf("asking piece %d to peer %s of size %d\n", lastPieceIdxAsked, peer.Peer.GetID(), pieceSize)
-			pieceBuffer, err := peer.Peer.RequestPiece(lastPieceIdxAsked, pieceSize)
+		for _, piece := range pieces {
+			pieceSize := piece.CalculateSize(fileLength)
+
+			fmt.Printf("asking piece %d to peer %s of size %d\n", piece.Idx, peer.Peer.GetID(), pieceSize)
+			err := peer.Peer.RequestPiece(&piece)
 			if err != nil {
 				m.SetStatus(PeerID(peer.Peer.GetID()), Disconnected)
 				peer.Peer.CloseConnection()
 				break
-			} else if pieceBuffer == nil {
-				fmt.Println("piece is null", pieceBuffer)
+			} else if piece.Buf == nil {
+				fmt.Println("piece is null", piece.Buf)
 				continue
 			} else {
-				pieceHash := hashes[lastPieceIdxAsked]
-
-				sha1 := sha1.Sum(pieceBuffer)
-				fmt.Println("piece num [", lastPieceIdxAsked, "] ", "pieceBuffer: ", sha1, " pieceHash: ", pieceHash)
-				err = piece.CheckIntegrity(pieceHash, pieceBuffer)
+				sha1 := sha1.Sum(piece.Buf)
+				fmt.Println("piece num [", piece.Idx, "] ", "pieceBuffer: ", sha1, " pieceHash: ", piece.Hash)
+				err = piece.CheckIntegrity(piece.Buf)
 				if err != nil {
 					fmt.Printf("---piece integrity failed\n")
 					continue
 				}
 				peer.OnPieceRequestSucceed()
-				lastPieceIdxAsked++
+				pieceObserver <- piece
 			}
 		}
 	}

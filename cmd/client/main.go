@@ -16,6 +16,7 @@ import (
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/ClientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
 	peermanager "github.com/TheLox95/go-torrent-client/pkg/peerManager"
+	"github.com/TheLox95/go-torrent-client/pkg/piece"
 
 	bencode "github.com/jackpal/bencode-go"
 )
@@ -157,15 +158,26 @@ func main() {
 		peerManager.Add(&peer)
 	}
 
-	fmt.Println(peerManager.TotalAvailableConnected())
-
-	fileBuffer := make([]byte, bto.Info.Length)
 	hashes, err := bto.Info.splitPieceHashes()
 	if err != nil {
 		fmt.Println("could not parce pieces hashes", err)
 		os.Exit(1)
 	}
-	peerManager.Download(fileBuffer, bto.Info.PieceLength, bto.Info.Length, hashes)
+
+	hashesLen := len(hashes)
+	pieceChan := make(chan piece.Piece, hashesLen)
+	peerManager.Download(pieceChan, bto.Info.PieceLength, bto.Info.Length, hashes)
+
+	fileBuffer := make([]byte, bto.Info.Length)
+	donePieces := 0
+	for donePieces < hashesLen {
+		piece := <-pieceChan
+		fmt.Println("###adding piece to buffer...")
+		begin, end := piece.CalculateBounds()
+		copy(fileBuffer[begin:end], piece.Buf)
+		donePieces++
+	}
+	close(pieceChan)
 
 	/*hashLen := 20 // Length of SHA-1 hash
 	piecesBuf := []byte(bto.Info.Pieces)

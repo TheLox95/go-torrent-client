@@ -12,10 +12,8 @@ import (
 
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/ClientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peerMessage"
+	"github.com/TheLox95/go-torrent-client/pkg/piece"
 )
-
-// MaxBlockSize is the largest number of bytes a request can ask for
-const MaxBlockSize = 16384
 
 type Peer struct {
 	IP   net.IP
@@ -113,51 +111,45 @@ func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 	return nil
 }
 
-func (p *Peer) RequestPiece(pieceIdx, pieceSize int) ([]byte, error) {
-	pieceBuf := make([]byte, pieceSize)
+func (p *Peer) RequestPiece(piece *piece.Piece) error {
+	piece.Buf = make([]byte, piece.Length)
 
 	totalDownloaded := 0
-	blockSize := MaxBlockSize
-	// Last block might be shorter than the typical block
-	if pieceSize-totalDownloaded < blockSize {
-		blockSize = pieceSize - totalDownloaded
-	}
+	blockSize := piece.CalculateBlockSize(totalDownloaded)
 
-	fmt.Println("pieceSize: ", pieceSize, " totalDownloaded: ", totalDownloaded)
-	for totalDownloaded < pieceSize {
-
+	for totalDownloaded < piece.Length {
 		piecePayload := make([]byte, 12)
-		binary.BigEndian.PutUint32(piecePayload[0:4], uint32(pieceIdx))
+		binary.BigEndian.PutUint32(piecePayload[0:4], uint32(piece.Idx))
 		binary.BigEndian.PutUint32(piecePayload[4:8], uint32(totalDownloaded))
 		binary.BigEndian.PutUint32(piecePayload[8:12], uint32(blockSize))
 
 		response, err := peerMessage.SendMessage(*p.conn, peerMessage.MsgRequest, piecePayload)
 		if err != nil {
 			fmt.Println("Failed to send message", err)
-			return nil, errors.New("failed to send piece request")
+			return errors.New("failed to send piece request")
 		}
 
 		if response == nil {
 			fmt.Println("Piece response is nil")
-			return nil, errors.New("Piece response is nil")
+			return errors.New("Piece response is nil")
 		}
 
-		pieceResp, err := response.ParsePiece(pieceIdx, pieceBuf)
+		pieceResp, err := response.ParsePiece(piece.Idx, piece.Buf)
 		if err != nil {
 			fmt.Println("error parsing piece", err)
-			return nil, errors.New("error parsing piece")
+			return errors.New("error parsing piece")
 		}
 
 		if pieceResp == 0 {
 			fmt.Println("Piece response is 0")
-			return nil, errors.New("Piece response is 0")
+			return errors.New("Piece response is 0")
 		}
 
 		totalDownloaded += blockSize
-		fmt.Println("pieceSize: ", pieceSize, " totalDownloaded: ", totalDownloaded)
+		fmt.Println("piece.Length: ", piece.Length, " totalDownloaded: ", totalDownloaded)
 	}
 
-	return pieceBuf, nil
+	return nil
 }
 
 func (p *Peer) OnPieceRequestSucceed() error {
