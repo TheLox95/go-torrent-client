@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -15,10 +16,13 @@ import (
 	"github.com/TheLox95/go-torrent-client/pkg/piece"
 )
 
+const MAX_REQUEST_PER_PEER = 1
+
 type Peer struct {
-	IP   net.IP
-	Port uint16
-	conn *net.Conn
+	IP          net.IP
+	Port        uint16
+	PiecesAsked int
+	conn        *net.Conn
 }
 
 func (p *Peer) GetID() string {
@@ -29,6 +33,7 @@ func (p *Peer) GetID() string {
 func (p *Peer) CloseConnection() {
 	(*p.conn).SetDeadline(time.Time{}) // Disable the deadline
 	(*p.conn).Close()
+	p.conn = nil
 }
 
 func (p *Peer) IsConnected() bool {
@@ -39,7 +44,7 @@ func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 	if p.conn == nil {
 		peerConn, err := net.DialTimeout("tcp", peerUrl, 30*time.Second)
 		if err != nil {
-			fmt.Println("Could not call peer", err)
+			fmt.Println("Could not call peer:", err)
 			return errors.New("connection failed")
 		}
 		p.conn = &peerConn
@@ -134,19 +139,14 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 			return errors.New("Piece response is nil")
 		}
 
-		pieceResp, err := response.ParsePiece(piece.Idx, piece.Buf)
+		err = response.ParsePiece(piece.Idx, piece.Buf)
 		if err != nil {
-			fmt.Println("error parsing piece", err)
-			return errors.New("error parsing piece")
-		}
-
-		if pieceResp == 0 {
-			fmt.Println("Piece response is 0")
-			return errors.New("Piece response is 0")
+			fmt.Println("ParsePiece:", blockSize, " total: ", totalDownloaded)
+			return err
 		}
 
 		totalDownloaded += blockSize
-		fmt.Println("piece.Length: ", piece.Length, " totalDownloaded: ", totalDownloaded)
+		fmt.Println("pieceIDX: ", piece.Idx, " totalDownloaded: ", totalDownloaded, " [", runtime.NumGoroutine(), "]")
 	}
 
 	return nil

@@ -165,15 +165,15 @@ func main() {
 	}
 
 	hashesLen := len(hashes)
-	pieceChan := make(chan piece.Piece, hashesLen)
-	peerManager.Download(pieceChan, bto.Info.PieceLength, bto.Info.Length, hashes)
+	pieceChan := make(chan *piece.Piece, hashesLen)
+	go peerManager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
 
 	fileBuffer := make([]byte, bto.Info.Length)
 	donePieces := 0
 	for donePieces < hashesLen {
 		piece := <-pieceChan
 		fmt.Println("###adding piece to buffer...")
-		begin, end := piece.CalculateBounds()
+		begin, end := piece.CalculateBounds(bto.Info.Length)
 		copy(fileBuffer[begin:end], piece.Buf)
 		donePieces++
 	}

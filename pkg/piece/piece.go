@@ -16,17 +16,17 @@ type Piece struct {
 	Length int
 }
 
-func (p *Piece) CalculateBounds() (begin int, end int) {
+func (p *Piece) CalculateBounds(torrentLength int) (begin int, end int) {
 	begin = p.Idx * p.Length
 	end = begin + p.Length
-	if end > p.Length {
-		end = p.Length
+	if end > torrentLength {
+		end = torrentLength
 	}
 	return begin, end
 }
 
 func (p *Piece) CalculateSize(torrentLength int) (size int) {
-	begin, end := p.CalculateBounds()
+	begin, end := p.CalculateBounds(torrentLength)
 	return end - begin
 }
 
