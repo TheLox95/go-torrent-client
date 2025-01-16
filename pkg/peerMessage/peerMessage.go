@@ -3,7 +3,6 @@ package peerMessage
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 )
@@ -49,7 +48,6 @@ func (r *PeerMessageResponse) Read() (*PeerMessage, error) {
 	lengthBuf := make([]byte, 4)
 	_, err := io.ReadFull(*r.c, lengthBuf)
 	if err != nil {
-		fmt.Println("111111", err)
 		return nil, err
 	}
 	length := binary.BigEndian.Uint32(lengthBuf)
@@ -73,51 +71,20 @@ func (r *PeerMessageResponse) Read() (*PeerMessage, error) {
 	return msg, nil
 }
 
-func (r *PeerMessageResponse) ParsePiece(index int, pieceBuf []byte) error {
-	msg, err := r.Read()
-
-	if err != nil {
-		fmt.Println("Could not parse response message")
-		return err
-	}
-
-	if msg.ID != MsgPiece {
-		fmt.Printf("Expected PIECE (ID %d), got ID %d\n", MsgPiece, msg.ID)
-		return errors.New(NON_EXPECTED_MSG_ID)
-	}
-	if len(msg.Payload) < 8 {
-		return fmt.Errorf("Payload too short. %d < 8", len(msg.Payload))
-	}
-	parsedIndex := int(binary.BigEndian.Uint32(msg.Payload[0:4]))
-	if parsedIndex != index {
-		return fmt.Errorf("Expected index %d, got %d", index, parsedIndex)
-	}
-	begin := int(binary.BigEndian.Uint32(msg.Payload[4:8]))
-	if begin >= len(pieceBuf) {
-		return fmt.Errorf("Begin offset too high. %d >= %d", begin, len(pieceBuf))
-	}
-	data := msg.Payload[8:]
-	if begin+len(data) > len(pieceBuf) {
-		return fmt.Errorf("Data too long [%d] for offset %d with length %d", len(data), begin, len(pieceBuf))
-	}
-	copy(pieceBuf[begin:], data)
-	return nil
-}
-
-func SendMessage(c net.Conn, id MessageID, payload []byte) (*PeerMessageResponse, error) {
+func SendMessage(c *net.Conn, id MessageID, payload []byte) (*PeerMessageResponse, error) {
 	length := uint32(len(payload) + 1) // +1 for id
 	buf := make([]byte, 4+length)
 	binary.BigEndian.PutUint32(buf[0:4], length)
 	buf[4] = byte(id)
 	copy(buf[5:], payload)
 
-	_, err := c.Write(buf)
+	_, err := (*c).Write(buf)
 	if err != nil {
 		return nil, err
 	}
 
 	r := &PeerMessageResponse{
-		c: &c,
+		c: c,
 	}
 
 	return r, nil

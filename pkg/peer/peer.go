@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"runtime"
 	"strconv"
 	"time"
 
@@ -18,10 +17,20 @@ import (
 
 const MAX_REQUEST_PER_PEER = 1
 
+type PeerStatus int
+type PeerID string
+
+const (
+	Connected    PeerStatus = 1
+	Disconnected PeerStatus = 2
+	Busy         PeerStatus = 3
+)
+
 type Peer struct {
 	IP          net.IP
 	Port        uint16
 	PiecesAsked int
+	Status      PeerStatus
 	conn        *net.Conn
 }
 
@@ -34,6 +43,8 @@ func (p *Peer) CloseConnection() {
 	(*p.conn).SetDeadline(time.Time{}) // Disable the deadline
 	(*p.conn).Close()
 	p.conn = nil
+	p.Status = Disconnected
+	p.PiecesAsked = 0
 }
 
 func (p *Peer) IsConnected() bool {
@@ -76,7 +87,7 @@ func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 		return errors.New("unexpected info hash")
 	}
 
-	response, err := peerMessage.SendMessage((*p.conn), peerMessage.MsgUnchoke, make([]byte, 0))
+	response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgUnchoke, make([]byte, 0))
 	if err != nil {
 		fmt.Println("Could not unchoke", err)
 		return errors.New("unchoke failed")
@@ -90,7 +101,7 @@ func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 		}
 		fmt.Println("unchoke said: ", unchoke.ID)
 		if unchoke.ID != peerMessage.MsgUnchoke {
-			response, err := peerMessage.SendMessage((*p.conn), peerMessage.MsgUnchoke, make([]byte, 0))
+			response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgUnchoke, make([]byte, 0))
 			if err != nil {
 				fmt.Println("Could not second unchoke: ", err)
 				return errors.New("second unchoke failed")
@@ -107,11 +118,13 @@ func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 		}
 	}
 
-	_, err = peerMessage.SendMessage((*p.conn), peerMessage.MsgInterested, make([]byte, 0))
+	_, err = peerMessage.SendMessage(p.conn, peerMessage.MsgInterested, make([]byte, 0))
 	if err != nil {
 		fmt.Println("Could not send interested", err)
 		return errors.New("INTERESTED request failed")
 	}
+
+	p.Status = Connected
 
 	return nil
 }
@@ -120,15 +133,16 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 	piece.Buf = make([]byte, piece.Length)
 
 	totalDownloaded := 0
-	blockSize := piece.CalculateBlockSize(totalDownloaded)
+	requested := 0
+	blockSize := piece.CalculateBlockSize(requested)
 
-	for totalDownloaded < piece.Length {
+	for requested < piece.Length && totalDownloaded < piece.Length {
 		piecePayload := make([]byte, 12)
 		binary.BigEndian.PutUint32(piecePayload[0:4], uint32(piece.Idx))
-		binary.BigEndian.PutUint32(piecePayload[4:8], uint32(totalDownloaded))
+		binary.BigEndian.PutUint32(piecePayload[4:8], uint32(requested))
 		binary.BigEndian.PutUint32(piecePayload[8:12], uint32(blockSize))
 
-		response, err := peerMessage.SendMessage(*p.conn, peerMessage.MsgRequest, piecePayload)
+		response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgRequest, piecePayload)
 		if err != nil {
 			fmt.Println("Failed to send message", err)
 			return errors.New("failed to send piece request")
@@ -139,21 +153,29 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 			return errors.New("Piece response is nil")
 		}
 
-		err = response.ParsePiece(piece.Idx, piece.Buf)
+		requested += blockSize
+
+		msg, err := response.Read()
 		if err != nil {
-			fmt.Println("ParsePiece:", blockSize, " total: ", totalDownloaded)
+			fmt.Println("Could not read message response")
+			return errors.New("could not read message response")
+		}
+		payloadSize, err := piece.ParsePiece(msg)
+		if err != nil {
 			return err
 		}
 
-		totalDownloaded += blockSize
-		fmt.Println("pieceIDX: ", piece.Idx, " totalDownloaded: ", totalDownloaded, " [", runtime.NumGoroutine(), "]")
+		totalDownloaded += payloadSize
+		fmt.Println("pieceIDX: ", piece.Idx, " Downloaded: ", totalDownloaded, " of Total: ", piece.Length, " [", (*p.conn).RemoteAddr().String(), "]")
 	}
 
 	return nil
 }
 
-func (p *Peer) OnPieceRequestSucceed() error {
-	_, err := peerMessage.SendMessage(*p.conn, peerMessage.MsgHave, make([]byte, 0))
+func (p *Peer) OnPieceRequestSucceed(index int) error {
+	payload := make([]byte, 4)
+	binary.BigEndian.PutUint32(payload, uint32(index))
+	_, err := peerMessage.SendMessage(p.conn, peerMessage.MsgHave, payload)
 	if err != nil {
 		fmt.Println("Failed to send HAVING message", err)
 		return errors.New("failed to send HAVING request")
