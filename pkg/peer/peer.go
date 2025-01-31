@@ -10,12 +10,13 @@ import (
 	"strconv"
 	"time"
 
-	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/ClientIdentifier"
+	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peerMessage"
 	"github.com/TheLox95/go-torrent-client/pkg/piece"
 )
 
 const MAX_REQUEST_PER_PEER = 1
+const MAX_CONNECTION_ATTEMPS = 3
 
 type PeerStatus int
 type PeerID string
@@ -27,11 +28,12 @@ const (
 )
 
 type Peer struct {
-	IP          net.IP
-	Port        uint16
-	PiecesAsked int
-	Status      PeerStatus
-	conn        *net.Conn
+	IP                net.IP
+	Port              uint16
+	PiecesAsked       int
+	ConnectionAttemps int
+	Status            PeerStatus
+	conn              *net.Conn
 }
 
 func (p *Peer) GetID() string {
@@ -48,9 +50,10 @@ func (p *Peer) CloseConnection() {
 }
 
 func (p *Peer) IsConnected() bool {
-	return p.conn != nil
+	return p.Status == Connected
 }
 func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
+	p.Status = Disconnected
 	peerUrl := net.JoinHostPort(p.IP.String(), strconv.Itoa(int(p.Port)))
 	if p.conn == nil {
 		peerConn, err := net.DialTimeout("tcp", peerUrl, 30*time.Second)
@@ -160,6 +163,11 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 			fmt.Println("Could not read message response")
 			return errors.New("could not read message response")
 		}
+
+		if msg.ID != peerMessage.MsgPiece {
+			return errors.New("received non piece message")
+		}
+
 		payloadSize, err := piece.ParsePiece(msg)
 		if err != nil {
 			return err

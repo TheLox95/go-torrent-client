@@ -13,10 +13,9 @@ import (
 	"strconv"
 	"time"
 
-	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/ClientIdentifier"
+	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
 	peermanager "github.com/TheLox95/go-torrent-client/pkg/peerManager"
-	"github.com/TheLox95/go-torrent-client/pkg/piece"
 
 	bencode "github.com/jackpal/bencode-go"
 )
@@ -164,20 +163,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	hashesLen := len(hashes)
-	pieceChan := make(chan *piece.Piece, hashesLen)
-	go peerManager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
+	buf := peerManager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
 
-	fileBuffer := make([]byte, bto.Info.Length)
-	donePieces := 0
-	for donePieces < hashesLen {
-		piece := <-pieceChan
-		fmt.Println("###adding piece to buffer...")
-		begin, end := piece.CalculateBounds(bto.Info.Length)
-		copy(fileBuffer[begin:end], piece.Buf)
-		donePieces++
+	outFile, err := os.Create("./debian.iso")
+	if err != nil {
+		fmt.Println("could not create file", err)
+		os.Exit(1)
 	}
-	close(pieceChan)
+	defer outFile.Close()
+	_, err = outFile.Write(buf)
+	if err != nil {
+		fmt.Println("could not write file", err)
+		os.Exit(1)
+	}
 
 	/*hashLen := 20 // Length of SHA-1 hash
 	piecesBuf := []byte(bto.Info.Pieces)
