@@ -4,15 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
 	downloadunit "github.com/TheLox95/go-torrent-client/pkg/downloadUnit"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
-	"github.com/TheLox95/go-torrent-client/pkg/peerMessage"
 	"github.com/TheLox95/go-torrent-client/pkg/piece"
 )
 
@@ -28,6 +25,7 @@ type PeerManager struct {
 	connectedPool         *sync.Pool
 	piecePool             chan *piece.Piece
 	piecesCompletedAmount int
+	activeDownloads       int
 	piecesCompleted       []*piece.Piece
 }
 
@@ -64,8 +62,7 @@ func (m *PeerManager) connectPeer(p *peer.Peer) {
 		} else {
 			if p.ConnectionAttemps <= peer.MAX_CONNECTION_ATTEMPS {
 				p.ConnectionAttemps++
-				m.connectPeer(p)
-
+				//time.AfterFunc(5*time.Second, func() { m.connectPeer(p) })
 			}
 		}
 	}
@@ -79,20 +76,21 @@ func (m *PeerManager) askPiece(unit *downloadunit.DownloadUnit, fileLength int) 
 	if err != nil {
 		fmt.Printf(Red+"PIECE_ID [%d] RequestPiece failed for IP %s with: %v\n"+Reset, unit.Piece.Idx, unit.Peer.IP.String(), err)
 		m.piecePool <- unit.Piece
-		if err.Error() == peerMessage.KEEP_ALIVE_MESSAGE {
-			unit.Peer.PiecesAsked = 0
-			m.connectedPool.Put(unit.Peer)
-		} else if err.Error() == peerMessage.NON_EXPECTED_MSG_ID {
-			unit.Peer.PiecesAsked = 0
-			m.connectedPool.Put(unit.Peer)
-		} else if strings.Contains(err.Error(), "ected index") {
-			unit.Peer.PiecesAsked = 0
-			m.connectedPool.Put(unit.Peer)
-		} else {
-			//m.SetStatus(peer.PeerID(unit.Peer.GetID()), peer.Disconnected)
-			//unit.Peer.CloseConnection()
-			//go m.connectPeer(unit.Peer)
-		}
+		//if err.Error() == peerMessage.KEEP_ALIVE_MESSAGE {
+		//	unit.Peer.PiecesAsked = 0
+		//	m.connectedPool.Put(unit.Peer)
+		//} else if err.Error() == peerMessage.NON_EXPECTED_MSG_ID {
+		//	unit.Peer.PiecesAsked = 0
+		//	m.connectedPool.Put(unit.Peer)
+		//} else if strings.Contains(err.Error(), "ected index") {
+		//	unit.Peer.PiecesAsked = 0
+		//	m.connectedPool.Put(unit.Peer)
+		//} else {
+		//	unit.Peer.PiecesAsked = 0
+		//	//m.SetStatus(peer.PeerID(unit.Peer.GetID()), peer.Disconnected)
+		//	//unit.Peer.CloseConnection()
+		//	//go m.connectPeer(unit.Peer)
+		//}
 		return errors.New("call to piece failed")
 	} else if unit.Piece.Buf == nil {
 		fmt.Println("piece is null", unit.Piece.Buf)
@@ -105,7 +103,7 @@ func (m *PeerManager) askPiece(unit *downloadunit.DownloadUnit, fileLength int) 
 	err = unit.Piece.CheckIntegrity()
 	if err != nil {
 		unit.Peer.PiecesAsked = 0
-		fmt.Printf(Green+"putting pice [%d] back :: left on pool %d\n"+Reset, unit.Piece.Idx)
+		fmt.Printf(Green+"putting pice [%d] back\n"+Reset, unit.Piece.Idx)
 		m.piecePool <- unit.Piece
 		m.connectedPool.Put(unit.Peer)
 		fmt.Println(unit.Piece.Idx, " ::piece is corrupted")
@@ -120,41 +118,40 @@ func (m *PeerManager) askPiece(unit *downloadunit.DownloadUnit, fileLength int) 
 	return nil
 }
 
+func (m *PeerManager) startExchange(p *peer.Peer, fileLength int) {
+	m.connectPeer(p)
+	for pw := range m.piecePool {
+		if p.PiecesAsked >= peer.MAX_REQUEST_PER_PEER || p.IsConnected() == false {
+			m.piecePool <- pw
+			continue
+		}
+		p.PiecesAsked++
+		unit := &downloadunit.DownloadUnit{Peer: p, Piece: pw, Status: downloadunit.Failed}
+		m.activeDownloads++
+
+		fmt.Println("####AVAILABLE_IP: ", unit.Peer.IP, " pieces asked: ", unit.Peer.PiecesAsked, " for piece: ", unit.Piece.Idx, " completed so far: ", m.piecesCompletedAmount, " workers:", m.activeDownloads)
+		m.askPiece(unit, fileLength)
+		m.activeDownloads--
+	}
+}
+
 func (m *PeerManager) Download(pieceLength, fileLength int, hashes [][20]byte) []byte {
 	hashesLen := len(hashes)
 	if m.piecePool == nil {
 		m.piecePool = make(chan *piece.Piece, hashesLen)
 	}
-	fmt.Println("here")
 	for i := 0; i < hashesLen; i++ {
 		p := piece.Piece{Idx: i, Hash: hashes[i], Length: pieceLength, Buf: nil}
 		m.piecePool <- &p
 	}
 
-	for _, peer := range m.peers {
-		go m.connectPeer(peer)
+	for idx, peer := range m.peers {
+		fmt.Println("conecting ", idx)
+		go m.startExchange(peer, fileLength)
 	}
 
 	for m.piecesCompletedAmount < hashesLen {
-		if m.connectedPool == nil {
-			continue
-		}
-		aaa := m.connectedPool.Get()
-		if aaa == nil {
-			continue
-		}
 
-		thisPeer, _ := aaa.(*peer.Peer)
-
-		if thisPeer.IsConnected() == false || thisPeer.PiecesAsked == peer.MAX_REQUEST_PER_PEER {
-			continue
-		}
-
-		thisPeer.PiecesAsked++
-		unit := &downloadunit.DownloadUnit{Peer: thisPeer, Piece: <-m.piecePool, Status: downloadunit.Failed}
-
-		fmt.Println("####AVAILABLE_IP: ", unit.Peer.IP, " pieces asked: ", unit.Peer.PiecesAsked, " for piece: ", unit.Piece.Idx, " completed so far: ", m.piecesCompletedAmount, " workers:", runtime.NumGoroutine()-1)
-		go m.askPiece(unit, fileLength)
 	}
 	close(m.piecePool)
 	buf := make([]byte, fileLength)

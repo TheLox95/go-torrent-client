@@ -70,6 +70,32 @@ func (r *PeerMessageResponse) Read() (*PeerMessage, error) {
 
 	return msg, nil
 }
+func Read(c *net.Conn) (*PeerMessage, error) {
+	lengthBuf := make([]byte, 4)
+	_, err := io.ReadFull(*c, lengthBuf)
+	if err != nil {
+		return nil, err
+	}
+	length := binary.BigEndian.Uint32(lengthBuf)
+
+	// keep-alive message
+	if length == 0 {
+		return nil, errors.New(KEEP_ALIVE_MESSAGE)
+	}
+
+	messageBuf := make([]byte, length)
+	_, err = io.ReadFull(*c, messageBuf)
+	if err != nil {
+		return nil, err
+	}
+
+	msg := &PeerMessage{
+		ID:      MessageID(messageBuf[0]),
+		Payload: messageBuf[1:],
+	}
+
+	return msg, nil
+}
 
 func SendMessage(c *net.Conn, id MessageID, payload []byte) (*PeerMessageResponse, error) {
 	length := uint32(len(payload) + 1) // +1 for id

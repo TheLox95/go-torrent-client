@@ -25,6 +25,7 @@ const (
 	Connected    PeerStatus = 1
 	Disconnected PeerStatus = 2
 	Busy         PeerStatus = 3
+	Choked       PeerStatus = 4
 )
 
 type Peer struct {
@@ -80,7 +81,7 @@ func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 		return errors.New("handshake failed")
 	}
 
-	_, handshakeInfoHash, _, err := ReadHandshake((*p.conn))
+	_, handshakeInfoHash, _, err := ReadHandshake(*p.conn)
 	if err != nil {
 		fmt.Println("Could not read response from peer", err)
 		return errors.New("handshake read failed")
@@ -90,35 +91,60 @@ func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 		return errors.New("unexpected info hash")
 	}
 
-	response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgUnchoke, make([]byte, 0))
+	lengthBuf := make([]byte, 4)
+	_, err = io.ReadFull(*p.conn, lengthBuf)
+	if err != nil {
+		return nil
+	}
+	length := binary.BigEndian.Uint32(lengthBuf)
+
+	// keep-alive message
+	if length == 0 {
+		return nil
+	}
+
+	messageBuf := make([]byte, length)
+	_, err = io.ReadFull(*p.conn, messageBuf)
+	if err != nil {
+		return nil
+	}
+
+	isBitfield := peerMessage.MessageID((messageBuf[0])) == peerMessage.MsgBitfield
+	fmt.Println("is bitfield? ", isBitfield)
+	if isBitfield == false {
+		(*p.conn).Close()
+		return nil
+	}
+
+	_, err = peerMessage.SendMessage(p.conn, peerMessage.MsgUnchoke, make([]byte, 0))
 	if err != nil {
 		fmt.Println("Could not unchoke", err)
 		return errors.New("unchoke failed")
 	} else {
-		unchoke, err := response.Read()
-		if err != nil {
-			return errors.New("could not read UNCHOKE response")
-		}
-		if unchoke == nil {
-			return errors.New("UNCHOKE response is null")
-		}
-		fmt.Println("unchoke said: ", unchoke.ID)
-		if unchoke.ID != peerMessage.MsgUnchoke {
-			response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgUnchoke, make([]byte, 0))
-			if err != nil {
-				fmt.Println("Could not second unchoke: ", err)
-				return errors.New("second unchoke failed")
-			}
-			un, err := response.Read()
-			if err != nil {
-				return errors.New("could not read second UNCHOKE")
-			}
-			if un != nil {
-				fmt.Println("second unchoke said: ", un.ID)
-			} else {
-				fmt.Println("second unchoke message is nil")
-			}
-		}
+		//unchoke, err := response.Read()
+		//if err != nil {
+		//	return errors.New("could not read UNCHOKE response")
+		//}
+		//if unchoke == nil {
+		//	return errors.New("UNCHOKE response is null")
+		//}
+		//fmt.Println("unchoke said: ", unchoke.ID)
+		//if unchoke.ID != peerMessage.MsgUnchoke {
+		//	response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgUnchoke, make([]byte, 0))
+		//	if err != nil {
+		//		fmt.Println("Could not second unchoke: ", err)
+		//		return errors.New("second unchoke failed")
+		//	}
+		//	un, err := response.Read()
+		//	if err != nil {
+		//		return errors.New("could not read second UNCHOKE")
+		//	}
+		//	if un != nil {
+		//		fmt.Println("second unchoke said: ", un.ID)
+		//	} else {
+		//		fmt.Println("second unchoke message is nil")
+		//	}
+		//}
 	}
 
 	_, err = peerMessage.SendMessage(p.conn, peerMessage.MsgInterested, make([]byte, 0))
@@ -139,41 +165,51 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 	requested := 0
 	blockSize := piece.CalculateBlockSize(requested)
 
-	for requested < piece.Length && totalDownloaded < piece.Length {
-		piecePayload := make([]byte, 12)
-		binary.BigEndian.PutUint32(piecePayload[0:4], uint32(piece.Idx))
-		binary.BigEndian.PutUint32(piecePayload[4:8], uint32(requested))
-		binary.BigEndian.PutUint32(piecePayload[8:12], uint32(blockSize))
+	for totalDownloaded < piece.Length {
+		for requested < piece.Length {
+			if p.Status == Choked {
+				continue
+			}
+			piecePayload := make([]byte, 12)
+			binary.BigEndian.PutUint32(piecePayload[0:4], uint32(piece.Idx))
+			binary.BigEndian.PutUint32(piecePayload[4:8], uint32(requested))
+			binary.BigEndian.PutUint32(piecePayload[8:12], uint32(blockSize))
 
-		response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgRequest, piecePayload)
-		if err != nil {
-			fmt.Println("Failed to send message", err)
-			return errors.New("failed to send piece request")
+			response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgRequest, piecePayload)
+			if err != nil {
+				fmt.Println("Failed to send message", err)
+				return errors.New("failed to send piece request")
+			}
+
+			if response == nil {
+				fmt.Println("Piece response is nil")
+				return errors.New("Piece response is nil")
+			}
+
+			requested += blockSize
+
 		}
 
-		if response == nil {
-			fmt.Println("Piece response is nil")
-			return errors.New("Piece response is nil")
-		}
-
-		requested += blockSize
-
-		msg, err := response.Read()
+		msg, err := peerMessage.Read(p.conn)
 		if err != nil {
 			fmt.Println("Could not read message response")
 			return errors.New("could not read message response")
 		}
+		if msg.ID == peerMessage.MsgChoke {
+			p.Status = Choked
+		} else if msg.ID == peerMessage.MsgUnchoke {
+			p.Status = Connected
+		} else if msg.ID == peerMessage.MsgHave {
+			fmt.Printf("peer [%s] has pice [%d]", p.GetID(), piece.Idx)
+		} else if msg.ID == peerMessage.MsgPiece {
+			payloadSize, err := piece.ParsePiece(msg)
+			if err != nil {
+				fmt.Println("Received :::::::::::::::::::::::::", err)
+				return err
+			}
 
-		if msg.ID != peerMessage.MsgPiece {
-			return errors.New("received non piece message")
+			totalDownloaded += payloadSize
 		}
-
-		payloadSize, err := piece.ParsePiece(msg)
-		if err != nil {
-			return err
-		}
-
-		totalDownloaded += payloadSize
 		fmt.Println("pieceIDX: ", piece.Idx, " Downloaded: ", totalDownloaded, " of Total: ", piece.Length, " [", (*p.conn).RemoteAddr().String(), "]")
 	}
 
