@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"time"
 
+	bencodetorrent "github.com/TheLox95/go-torrent-client/pkg/bencodeTorrent"
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
 	peermanager "github.com/TheLox95/go-torrent-client/pkg/peerManager"
@@ -29,34 +30,6 @@ type TorrentFile struct {
 	Name        string
 }
 
-type bencodeInfo struct {
-	Pieces      string `bencode:"pieces"`
-	PieceLength int    `bencode:"piece length"`
-	Length      int    `bencode:"length"`
-	Name        string `bencode:"name"`
-}
-
-func (i *bencodeInfo) splitPieceHashes() ([][20]byte, error) {
-	hashLen := 20 // Length of SHA-1 hash
-	buf := []byte(i.Pieces)
-	if len(buf)%hashLen != 0 {
-		err := fmt.Errorf("Received malformed pieces of length %d", len(buf))
-		return nil, err
-	}
-	numHashes := len(buf) / hashLen
-	hashes := make([][20]byte, numHashes)
-
-	for i := 0; i < numHashes; i++ {
-		copy(hashes[i][:], buf[i*hashLen:(i+1)*hashLen])
-	}
-	return hashes, nil
-}
-
-type bencodeTorrent struct {
-	Announce string      `bencode:"announce"`
-	Info     bencodeInfo `bencode:"info"`
-}
-
 type bencodeTrackerResp struct {
 	Interval int    `bencode:"interval"`
 	Peers    string `bencode:"peers"`
@@ -65,7 +38,7 @@ type bencodeTrackerResp struct {
 var peerID [20]byte
 var _, err = rand.Read(peerID[:])
 
-func getPeerList(bto *bencodeTorrent) (peers []peer.Peer, infoHash [20]byte) {
+func getPeerList(bto *bencodetorrent.BencodeTorrent) (peers []peer.Peer, infoHash [20]byte) {
 	base, err := url.Parse(bto.Announce)
 	if err != nil {
 		fmt.Println("Could not parse Announce")
@@ -87,7 +60,7 @@ func getPeerList(bto *bencodeTorrent) (peers []peer.Peer, infoHash [20]byte) {
 	params := url.Values{
 		"info_hash":  []string{string(infoHash[:])},
 		"peer_id":    []string{string(peerID[:])},
-		"port":       []string{strconv.Itoa(int(Port))},
+		"port":       []string{strconv.Itoa(Port)},
 		"uploaded":   []string{"0"},
 		"downloaded": []string{"0"},
 		"compact":    []string{"1"},
@@ -137,7 +110,7 @@ func main() {
 	}
 	defer file.Close()
 
-	bto := bencodeTorrent{}
+	bto := bencodetorrent.BencodeTorrent{}
 	err = bencode.Unmarshal(file, &bto)
 	if err != nil {
 		fmt.Println("Could not parse torrent file", err)
@@ -157,7 +130,7 @@ func main() {
 		peerManager.Add(&peer)
 	}
 
-	hashes, err := bto.Info.splitPieceHashes()
+	hashes, err := bto.Info.SplitPieceHashes()
 	if err != nil {
 		fmt.Println("could not parce pieces hashes", err)
 		os.Exit(1)
