@@ -6,10 +6,13 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
+	"maps"
+	mathRand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
 	peermanager "github.com/TheLox95/go-torrent-client/pkg/peerManager"
+	peermanager2 "github.com/TheLox95/go-torrent-client/pkg/peerManager2"
 
 	bencode "github.com/jackpal/bencode-go"
 )
@@ -100,7 +104,14 @@ func getPeerList(bto *bencodetorrent.BencodeTorrent) (peers []peer.Peer, infoHas
 	return peersSlice, infoHash
 }
 
+var transactionID = mathRand.Uint32()
+
 func main() {
+	bto := bencodetorrent.BencodeTorrent{}
+	var buf bytes.Buffer
+	info := &bto.Info
+
+	//torrentPath := "./nasa2.torrent"
 	torrentPath := "./debian.torrent"
 
 	file, err := os.Open(torrentPath)
@@ -110,14 +121,45 @@ func main() {
 	}
 	defer file.Close()
 
-	bto := bencodetorrent.BencodeTorrent{}
 	err = bencode.Unmarshal(file, &bto)
 	if err != nil {
 		fmt.Println("Could not parse torrent file", err)
 		os.Exit(1)
 	}
 
-	peers, infoHash := getPeerList(&bto)
+	err = bencode.Marshal(&buf, *info)
+	if err != nil {
+		fmt.Println("Could not Marshal encodeInfo")
+		os.Exit(1)
+	}
+	infoHash := sha1.Sum(buf.Bytes())
+
+	announceSlice := make([]string, len(bto.AnnounceList)+1)
+	for idx, item := range bto.AnnounceList {
+		announceSlice[idx] = item[0]
+	}
+	announceSlice[len(announceSlice)-1] = bto.Announce
+	slices.Sort(announceSlice)
+	announceSlice = slices.Compact(announceSlice)
+
+	peerManager2 := peermanager2.PeerManager2{
+		Urls:  announceSlice,
+		Peers: make(map[string]*peer.Peer),
+	}
+
+	params := peermanager2.GetPeersFromUDPParams{
+		TransactionID: transactionID,
+		InfoHash:      infoHash,
+		PeerID:        peerID,
+		TorrentLen:    bto.Info.Length,
+	}
+	peerManager2.PoolTrackers(&params)
+
+	time.Sleep(time.Second * 15)
+
+	os.Exit(1)
+	peers := slices.Collect(maps.Values(peerManager2.Peers))
+	//peers, _ := getPeerList(&bto)
 
 	peerManager := peermanager.PeerManager{
 		Client: &clientidentifier.ClientIdentifier{
@@ -127,7 +169,7 @@ func main() {
 	}
 	for p := 0; p < len(peers); p++ {
 		peer := peers[p]
-		peerManager.Add(&peer)
+		peerManager.Add(peer)
 	}
 
 	hashes, err := bto.Info.SplitPieceHashes()
@@ -136,7 +178,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	buf := peerManager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
+	fileBuffer := peerManager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
 
 	outFile, err := os.Create("./debian.iso")
 	if err != nil {
@@ -144,7 +186,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer outFile.Close()
-	_, err = outFile.Write(buf)
+	_, err = outFile.Write(fileBuffer)
 	if err != nil {
 		fmt.Println("could not write file", err)
 		os.Exit(1)
