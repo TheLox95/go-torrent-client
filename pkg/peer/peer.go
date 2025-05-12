@@ -178,6 +178,7 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 			response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgRequest, piecePayload)
 			if err != nil {
 				fmt.Println("Failed to send message", err)
+				p.CloseConnection()
 				return errors.New("failed to send piece request")
 			}
 
@@ -187,7 +188,6 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 			}
 
 			requested += blockSize
-
 		}
 
 		msg, err := peerMessage.Read(p.conn)

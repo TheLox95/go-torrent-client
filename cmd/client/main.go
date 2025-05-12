@@ -6,7 +6,6 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
-	"maps"
 	mathRand "math/rand/v2"
 	"net"
 	"net/http"
@@ -18,9 +17,10 @@ import (
 
 	bencodetorrent "github.com/TheLox95/go-torrent-client/pkg/bencodeTorrent"
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
+	downloadmanager "github.com/TheLox95/go-torrent-client/pkg/downloadManager"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
-	peermanager "github.com/TheLox95/go-torrent-client/pkg/peerManager"
 	peermanager2 "github.com/TheLox95/go-torrent-client/pkg/peerManager2"
+	"github.com/TheLox95/go-torrent-client/pkg/piece"
 
 	bencode "github.com/jackpal/bencode-go"
 )
@@ -142,9 +142,15 @@ func main() {
 	slices.Sort(announceSlice)
 	announceSlice = slices.Compact(announceSlice)
 
+	identifier := &clientidentifier.ClientIdentifier{
+		PeerID:   peerID,
+		InfoHash: infoHash,
+	}
+
 	peerManager2 := peermanager2.PeerManager2{
-		Urls:  announceSlice,
-		Peers: make(map[string]*peer.Peer),
+		Urls:   announceSlice,
+		Peers:  make(map[string]*peer.Peer),
+		Client: identifier,
 	}
 
 	params := peermanager2.GetPeersFromUDPParams{
@@ -155,30 +161,34 @@ func main() {
 	}
 	peerManager2.PoolTrackers(&params)
 
-	time.Sleep(time.Second * 15)
-
-	os.Exit(1)
-	peers := slices.Collect(maps.Values(peerManager2.Peers))
-	//peers, _ := getPeerList(&bto)
-
-	peerManager := peermanager.PeerManager{
-		Client: &clientidentifier.ClientIdentifier{
-			PeerID:   peerID,
-			InfoHash: infoHash,
-		},
-	}
-	for p := 0; p < len(peers); p++ {
-		peer := peers[p]
-		peerManager.Add(peer)
-	}
-
 	hashes, err := bto.Info.SplitPieceHashes()
 	if err != nil {
 		fmt.Println("could not parce pieces hashes", err)
 		os.Exit(1)
 	}
 
-	fileBuffer := peerManager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
+	manager := downloadmanager.DownloadManager{
+		PiecePool:   make(chan *piece.Piece, len(hashes)),
+		PeerManager: &peerManager2,
+		Client:      identifier,
+	}
+	fileBuffer := manager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
+
+	//peers := slices.Collect(maps.Values(peerManager2.Peers))
+	//peers, _ := getPeerList(&bto)
+
+	//peerManager := peermanager.PeerManager{
+	//	Client: &clientidentifier.ClientIdentifier{
+	//		PeerID:   peerID,
+	//		InfoHash: infoHash,
+	//	},
+	//}
+	//for p := 0; p < len(peers); p++ {
+	//	peer := peers[p]
+	//	peerManager.Add(peer)
+	//}
+
+	//fileBuffer := peerManager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
 
 	outFile, err := os.Create("./debian.iso")
 	if err != nil {

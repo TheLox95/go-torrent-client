@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
 	"github.com/jackpal/bencode-go"
 )
@@ -38,9 +39,11 @@ type GetPeersFromUDPParams struct {
 type PeerFetcher func(name *GetPeersFromUDPParams) error
 
 type PeerManager2 struct {
-	Peers   map[string]*peer.Peer
-	peersId []string
-	Urls    []string
+	Peers            map[string]*peer.Peer
+	availablePeers   []*peer.Peer
+	unconnectedPeers []*peer.Peer
+	Urls             []string
+	Client           *(clientidentifier.ClientIdentifier)
 }
 
 func (m *PeerManager2) getPeersFromUDP(params *GetPeersFromUDPParams) error {
@@ -135,15 +138,19 @@ func (m *PeerManager2) getPeersFromUDP(params *GetPeersFromUDPParams) error {
 	for i := 20; i < len(resp); i += 6 {
 		fmt.Println(resp[i : i+4])
 		peer := peer.Peer{IP: net.IP((resp[i : i+4])), Port: binary.BigEndian.Uint16(resp[i+4 : i+6])}
-		m.Peers[peer.GetID()] = &peer
-		m.peersId = append(m.peersId, peer.GetID())
+
+		_, ok := m.Peers[peer.GetID()]
+		if ok == false {
+			m.Peers[peer.GetID()] = &peer
+			go m.stablishConnection(&peer)
+		}
 	}
 
 	return nil
 }
 
 func (m *PeerManager2) getPeersFromHttp(params *GetPeersFromUDPParams) error {
-	fmt.Printf("fetching %s\n", params.Url)
+	fmt.Printf("pooling %s\n", params.Url)
 	base, err := url.Parse(params.Url)
 	if err != nil {
 		return fmt.Errorf("could not parse http Announce: %w", err)
@@ -184,13 +191,40 @@ func (m *PeerManager2) getPeersFromHttp(params *GetPeersFromUDPParams) error {
 	for i := range totalOfPeers {
 		offset := i * peerSize
 		peer := peer.Peer{IP: net.IP(peersBin[offset : offset+4]), Port: binary.BigEndian.Uint16(peersBin[offset+4 : offset+6])}
-		m.Peers[peer.GetID()] = &peer
-		m.peersId = append(m.peersId, peer.GetID())
+		_, ok := m.Peers[peer.GetID()]
+		if ok == false {
+			m.Peers[peer.GetID()] = &peer
+			go m.stablishConnection(&peer)
+		}
 	}
 	return nil
 }
 
+func (m *PeerManager2) stablishConnection(peer *peer.Peer) {
+	err := peer.Connect(m.Client)
+	if err == nil {
+		m.availablePeers = append(m.availablePeers, peer)
+	} else {
+		m.unconnectedPeers = append(m.unconnectedPeers, peer)
+	}
+}
+
+func (m *PeerManager2) watchUnconnectedPeers() {
+	go func() {
+		for {
+			unconnectedCount := len(m.unconnectedPeers)
+			for _ = range unconnectedCount {
+				peer := m.unconnectedPeers[0]
+				m.unconnectedPeers = m.unconnectedPeers[1:]
+				m.stablishConnection(peer)
+			}
+			time.Sleep(time.Second * 30)
+		}
+	}()
+}
+
 func (m *PeerManager2) ResolvePeerFetching(url string) (PeerFetcher, error) {
+	m.watchUnconnectedPeers()
 	if strings.Contains(url, "udp") {
 		return m.getPeersFromUDP, nil
 	} else if strings.Contains(url, "http") {
@@ -200,24 +234,28 @@ func (m *PeerManager2) ResolvePeerFetching(url string) (PeerFetcher, error) {
 }
 
 func (m *PeerManager2) GetPeer() *peer.Peer {
-	if len(m.peersId) == 0 {
+	if len(m.availablePeers) == 0 {
 		return nil
 	}
-	peerId := m.peersId[0]
-	m.peersId = m.peersId[1:]
-	peer := m.Peers[peerId]
-	delete(m.Peers, peerId)
+	peer := m.availablePeers[0]
+	m.availablePeers = m.availablePeers[1:]
 	return peer
 }
 
 func (m *PeerManager2) AddPeer(p *peer.Peer) {
-	m.Peers[p.GetID()] = p
+	if p.IsConnected() {
+		m.availablePeers = append(m.availablePeers, p)
+	} else {
+		m.unconnectedPeers = append(m.unconnectedPeers, p)
+	}
 }
 
+func (m *PeerManager2) AvailablePeers() int {
+	return len(m.Peers)
+}
 func (m *PeerManager2) PoolTrackers(params *GetPeersFromUDPParams) {
 	go func() {
 		for {
-			fmt.Println("Pooling peers")
 			for i := range len(m.Urls) {
 				url := m.Urls[i]
 				fn, _ := m.ResolvePeerFetching(url)

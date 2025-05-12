@@ -149,7 +149,6 @@ func (m *PeerManager) Download(pieceLength, fileLength int, hashes [][20]byte) [
 		fmt.Println("conecting ", idx)
 		go m.startExchange(peer, fileLength)
 	}
-
 	for m.piecesCompletedAmount < hashesLen {
 
 	}
@@ -171,17 +170,4 @@ func (m *PeerManager) Add(p *peer.Peer) {
 	p.Status = peer.Disconnected
 	peerUrl := net.JoinHostPort(p.IP.String(), strconv.Itoa(int(p.Port)))
 	m.peers[peer.PeerID(peerUrl)] = p
-}
-
-func (m *PeerManager) SetStatus(id peer.PeerID, status peer.PeerStatus) (err error) {
-	if m.peers == nil {
-		m.peers = make(map[peer.PeerID]*peer.Peer)
-	}
-	peer, ok := m.peers[id]
-	if !ok {
-		return errors.New("peer not found")
-	}
-
-	peer.Status = status
-	return nil
 }
