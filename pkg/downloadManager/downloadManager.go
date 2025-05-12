@@ -31,8 +31,8 @@ type DownloadManager struct {
 
 func (m *DownloadManager) Download(pieceLength int, fileLength int, hashes [][20]byte) []byte {
 	m.totalPieces = len(hashes)
-	for i := 0; i < m.totalPieces; i++ {
-		p := piece.Piece{Idx: i, Hash: hashes[i], Length: pieceLength, Buf: nil}
+	for i, hash := range hashes {
+		p := piece.Piece{Idx: i, Hash: hash, Length: pieceLength, Buf: nil}
 		m.PiecePool <- &p
 	}
 
@@ -41,10 +41,17 @@ func (m *DownloadManager) Download(pieceLength int, fileLength int, hashes [][20
 			break
 		}
 		p := m.PeerManager.GetPeer()
-		if p == nil {
-			m.PiecePool <- pw
+		for p == nil {
+			//m.PiecePool <- pw
+			p = m.PeerManager.GetPeer()
 			continue
 		}
+		if p.Bitfield.HasPiece(pw.Idx) == false {
+				m.PeerManager.AddPeer(p)
+				m.PiecePool <- pw
+				continue
+		}
+
 		fmt.Println("@@@@@@@@@@@@@@@@@@@@@@ COMPLETED SO FAR", len(m.piecesCompleted), " out of ", m.totalPieces, " with ", m.PeerManager.AvailablePeers(), " peers available")
 		if p.IsConnected() == false {
 			err := p.Connect(m.Client)

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/TheLox95/go-torrent-client/pkg/bitfield"
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peerMessage"
 	"github.com/TheLox95/go-torrent-client/pkg/piece"
@@ -35,6 +36,7 @@ type Peer struct {
 	ConnectionAttemps int
 	Status            PeerStatus
 	conn              *net.Conn
+	Bitfield *bitfield.Bitfield
 }
 
 func (p *Peer) GetID() string {
@@ -94,7 +96,7 @@ func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 	lengthBuf := make([]byte, 4)
 	_, err = io.ReadFull(*p.conn, lengthBuf)
 	if err != nil {
-		return nil
+		return errors.New("err reading lenBuf")
 	}
 	length := binary.BigEndian.Uint32(lengthBuf)
 
@@ -104,16 +106,24 @@ func (p *Peer) Connect(client *(clientidentifier.ClientIdentifier)) error {
 	}
 
 	messageBuf := make([]byte, length)
-	_, err = io.ReadFull(*p.conn, messageBuf)
+	msgSize, err := io.ReadFull(*p.conn, messageBuf)
 	if err != nil {
-		return nil
+		return errors.New("err reading messageBuf")
+	}
+
+	if msgSize == 0 {
+		(*p.conn).Close()
+		return errors.New("bitfield empty")
 	}
 
 	isBitfield := peerMessage.MessageID((messageBuf[0])) == peerMessage.MsgBitfield
 	fmt.Println("is bitfield? ", isBitfield)
 	if isBitfield == false {
 		(*p.conn).Close()
-		return nil
+		return errors.New("bitfield not received")
+	} else {
+		bit := bitfield.Bitfield(messageBuf[1:])
+		p.Bitfield = &bit
 	}
 
 	_, err = peerMessage.SendMessage(p.conn, peerMessage.MsgUnchoke, make([]byte, 0))
@@ -200,7 +210,8 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 		} else if msg.ID == peerMessage.MsgUnchoke {
 			p.Status = Connected
 		} else if msg.ID == peerMessage.MsgHave {
-			fmt.Printf("peer [%s] has pice [%d]", p.GetID(), piece.Idx)
+			index := int(binary.BigEndian.Uint32(msg.Payload))
+			p.Bitfield.SetPiece(index)
 		} else if msg.ID == peerMessage.MsgPiece {
 			payloadSize, err := piece.ParsePiece(msg)
 			if err != nil {

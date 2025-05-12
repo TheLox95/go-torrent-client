@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TheLox95/go-torrent-client/pkg/bitfield"
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
 	"github.com/jackpal/bencode-go"
@@ -137,7 +138,7 @@ func (m *PeerManager2) getPeersFromUDP(params *GetPeersFromUDPParams) error {
 
 	for i := 20; i < len(resp); i += 6 {
 		fmt.Println(resp[i : i+4])
-		peer := peer.Peer{IP: net.IP((resp[i : i+4])), Port: binary.BigEndian.Uint16(resp[i+4 : i+6])}
+		peer := peer.Peer{IP: net.IP((resp[i : i+4])), Port: binary.BigEndian.Uint16(resp[i+4 : i+6]), Bitfield: &bitfield.Bitfield{}}
 
 		_, ok := m.Peers[peer.GetID()]
 		if ok == false {
@@ -190,7 +191,7 @@ func (m *PeerManager2) getPeersFromHttp(params *GetPeersFromUDPParams) error {
 	}
 	for i := range totalOfPeers {
 		offset := i * peerSize
-		peer := peer.Peer{IP: net.IP(peersBin[offset : offset+4]), Port: binary.BigEndian.Uint16(peersBin[offset+4 : offset+6])}
+		peer := peer.Peer{IP: net.IP(peersBin[offset : offset+4]), Port: binary.BigEndian.Uint16(peersBin[offset+4 : offset+6]), Bitfield: &bitfield.Bitfield{}}
 		_, ok := m.Peers[peer.GetID()]
 		if ok == false {
 			m.Peers[peer.GetID()] = &peer

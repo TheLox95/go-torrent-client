@@ -106,6 +106,7 @@ func SendMessage(c *net.Conn, id MessageID, payload []byte) (*PeerMessageRespons
 	copy(buf[5:], payload)
 
 	(*c).SetDeadline(time.Now().Add(time.Second * 30))
+	defer (*c).SetDeadline(time.Time{})
 	_, err := (*c).Write(buf)
 	if err != nil {
 		return nil, err
