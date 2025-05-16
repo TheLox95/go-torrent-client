@@ -17,7 +17,9 @@ import (
 
 	bencodetorrent "github.com/TheLox95/go-torrent-client/pkg/bencodeTorrent"
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
+	delve "github.com/TheLox95/go-torrent-client/pkg/debug"
 	downloadmanager "github.com/TheLox95/go-torrent-client/pkg/downloadManager"
+	filemanager "github.com/TheLox95/go-torrent-client/pkg/fileManager"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
 	peermanager2 "github.com/TheLox95/go-torrent-client/pkg/peerManager2"
 	"github.com/TheLox95/go-torrent-client/pkg/piece"
@@ -112,7 +114,11 @@ func main() {
 	info := &bto.Info
 
 	//torrentPath := "./nasa2.torrent"
-	torrentPath := "./debian.torrent"
+	//torrentPath := "./debian.torrent"
+	torrentPath := "./mint.torrent"
+	if delve.RunningWithDelve() {
+		torrentPath = "../../mint.torrent"
+	}
 
 	file, err := os.Open(torrentPath)
 	if err != nil {
@@ -171,6 +177,9 @@ func main() {
 		PiecePool:   make(chan *piece.Piece, len(hashes)),
 		PeerManager: &peerManager2,
 		Client:      identifier,
+		FileManager: &filemanager.FileManager{
+			Filename: bto.Info.Name,
+		},
 	}
 	fileBuffer := manager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
 

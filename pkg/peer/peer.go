@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -34,9 +35,10 @@ type Peer struct {
 	Port              uint16
 	PiecesAsked       int
 	ConnectionAttemps int
+	PiecesDownloaded  int
 	Status            PeerStatus
 	conn              *net.Conn
-	Bitfield *bitfield.Bitfield
+	Bitfield          *bitfield.Bitfield
 }
 
 func (p *Peer) GetID() string {
@@ -45,11 +47,16 @@ func (p *Peer) GetID() string {
 }
 
 func (p *Peer) CloseConnection() {
-	(*p.conn).SetDeadline(time.Time{}) // Disable the deadline
-	(*p.conn).Close()
-	p.conn = nil
-	p.Status = Disconnected
-	p.PiecesAsked = 0
+	if p.conn != nil {
+		(*p.conn).SetDeadline(time.Time{}) // Disable the deadline
+		(*p.conn).Close()
+		p.conn = nil
+	}
+	if p.Status != Disconnected {
+		p.Status = Disconnected
+		p.PiecesAsked = 0
+		p.PiecesDownloaded = 0
+	}
 }
 
 func (p *Peer) IsConnected() bool {
@@ -175,6 +182,13 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 	requested := 0
 	blockSize := piece.CalculateBlockSize(requested)
 
+	if p.conn == nil {
+		return errors.New("disconnected user")
+	}
+
+	(*p.conn).SetDeadline(time.Now().Add(time.Second * 500))
+	defer (*p.conn).SetDeadline(time.Time{})
+
 	for totalDownloaded < piece.Length {
 		for requested < piece.Length {
 			if p.Status == Choked {
@@ -188,13 +202,16 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 			response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgRequest, piecePayload)
 			if err != nil {
 				fmt.Println("Failed to send message", err)
-				p.CloseConnection()
-				return errors.New("failed to send piece request")
+				//TODO: return error and disconnect user outside this function
+				if p.IsConnected() {
+					p.CloseConnection()
+				}
+				return fmt.Errorf("failed to send piece request: %w", err)
 			}
 
 			if response == nil {
 				fmt.Println("Piece response is nil")
-				return errors.New("Piece response is nil")
+				return errors.New("piece response is nil")
 			}
 
 			requested += blockSize
@@ -202,8 +219,8 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 
 		msg, err := peerMessage.Read(p.conn)
 		if err != nil {
-			fmt.Println("Could not read message response")
-			return errors.New("could not read message response")
+			fmt.Println("Could not read message response", err)
+			return fmt.Errorf("could not read message response: %w", err)
 		}
 		if msg.ID == peerMessage.MsgChoke {
 			p.Status = Choked
@@ -221,7 +238,7 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 
 			totalDownloaded += payloadSize
 		}
-		fmt.Println("pieceIDX: ", piece.Idx, " Downloaded: ", totalDownloaded, " of Total: ", piece.Length, " [", (*p.conn).RemoteAddr().String(), "]")
+		fmt.Println("pieceIDX: ", piece.Idx, " Downloaded: ", totalDownloaded, " of Total: ", piece.Length, " [", (*p.conn).RemoteAddr().String(), "] | routines ", runtime.NumGoroutine())
 	}
 
 	return nil
@@ -230,9 +247,11 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 func (p *Peer) OnPieceRequestSucceed(index int) error {
 	payload := make([]byte, 4)
 	binary.BigEndian.PutUint32(payload, uint32(index))
+	if p.conn == nil {
+		return errors.New("disconnected user")
+	}
 	_, err := peerMessage.SendMessage(p.conn, peerMessage.MsgHave, payload)
 	if err != nil {
-		fmt.Println("Failed to send HAVING message", err)
 		return errors.New("failed to send HAVING request")
 	}
 	return nil

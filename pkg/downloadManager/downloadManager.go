@@ -6,6 +6,7 @@ import (
 
 	clientidentifier "github.com/TheLox95/go-torrent-client/pkg/clientIdentifier"
 	downloadunit "github.com/TheLox95/go-torrent-client/pkg/downloadUnit"
+	filemanager "github.com/TheLox95/go-torrent-client/pkg/fileManager"
 	"github.com/TheLox95/go-torrent-client/pkg/peer"
 	"github.com/TheLox95/go-torrent-client/pkg/piece"
 )
@@ -24,35 +25,47 @@ type PeerManager interface {
 type DownloadManager struct {
 	PeerManager     PeerManager
 	PiecePool       chan *piece.Piece
-	piecesCompleted []*piece.Piece
+	piecesCompleted int
 	Client          *(clientidentifier.ClientIdentifier)
-	totalPieces int
+	FileManager     *(filemanager.FileManager)
+	totalPieces     int
 }
 
 func (m *DownloadManager) Download(pieceLength int, fileLength int, hashes [][20]byte) []byte {
+	m.FileManager.LoadMetadata()
 	m.totalPieces = len(hashes)
 	for i, hash := range hashes {
-		p := piece.Piece{Idx: i, Hash: hash, Length: pieceLength, Buf: nil}
-		m.PiecePool <- &p
+		if m.FileManager.PieceAlreadyDownloaded(&i) == false {
+			pieceLen := pieceLength
+			if i == m.totalPieces-1 {
+				pieceLen = fileLength - ( pieceLength*(m.totalPieces-1) )
+			}
+			p := piece.Piece{Idx: i, Hash: hash, Length: pieceLen, Buf: nil}
+			m.PiecePool <- &p
+		} else {
+			m.piecesCompleted++
+		}
 	}
 
 	for pw := range m.PiecePool {
-		if len(m.piecesCompleted) == m.totalPieces {
+		if m.piecesCompleted > 310 {
+			break
+		}
+		if m.piecesCompleted == m.totalPieces {
 			break
 		}
 		p := m.PeerManager.GetPeer()
-		for p == nil {
-			//m.PiecePool <- pw
-			p = m.PeerManager.GetPeer()
+		if p == nil {
+			m.PiecePool <- pw
 			continue
 		}
 		if p.Bitfield.HasPiece(pw.Idx) == false {
-				m.PeerManager.AddPeer(p)
-				m.PiecePool <- pw
-				continue
+			m.PeerManager.AddPeer(p)
+			m.PiecePool <- pw
+			continue
 		}
 
-		fmt.Println("@@@@@@@@@@@@@@@@@@@@@@ COMPLETED SO FAR", len(m.piecesCompleted), " out of ", m.totalPieces, " with ", m.PeerManager.AvailablePeers(), " peers available")
+		fmt.Println("@@@@@@@@@@@@@@@@@@@@@@ COMPLETED SO FAR", m.piecesCompleted, " out of ", m.totalPieces, " with ", m.PeerManager.AvailablePeers(), " peers available")
 		if p.IsConnected() == false {
 			err := p.Connect(m.Client)
 			if err != nil {
@@ -66,14 +79,8 @@ func (m *DownloadManager) Download(pieceLength int, fileLength int, hashes [][20
 		go m.askPiece(unit, fileLength)
 	}
 
-	close(m.PiecePool)
+	//close(m.PiecePool)
 	buf := make([]byte, fileLength)
-	for i := 0; i < len(m.piecesCompleted); i++ {
-		piece := m.piecesCompleted[i]
-
-		begin, end := piece.CalculateBounds(fileLength)
-		copy(buf[begin:end], piece.Buf)
-	}
 	return buf
 }
 
@@ -104,10 +111,10 @@ func (m *DownloadManager) askPiece(unit *downloadunit.DownloadUnit, fileLength i
 	unit.Peer.OnPieceRequestSucceed(unit.Piece.Idx)
 	unit.Status = downloadunit.Success
 	unit.Peer.PiecesAsked = 0
-	m.piecesCompleted = append(m.piecesCompleted, unit.Piece)
-	if (len(m.piecesCompleted) == m.totalPieces) {
+	m.piecesCompleted++
+	m.FileManager.AddToFile(unit.Piece)
+	if m.piecesCompleted == m.totalPieces {
 		m.PiecePool <- unit.Piece
 	}
-				
 	return nil
 }

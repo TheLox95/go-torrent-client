@@ -90,12 +90,12 @@ func (m *PeerManager2) getPeersFromUDP(params *GetPeersFromUDPParams) error {
 
 	action := binary.BigEndian.Uint32(announceBody[0:4])
 	transactionId := binary.BigEndian.Uint32(announceBody[4:8])
-	connId := binary.BigEndian.Uint32(announceBody[8:16])
+	connId := binary.BigEndian.Uint64(announceBody[8:])
 	fmt.Println(action, transactionId, connId)
 
 	announceMsg := make([]byte, 98)
 
-	binary.BigEndian.PutUint64(announceMsg[0:8], uint64(connId))
+	binary.BigEndian.PutUint64(announceMsg[0:8], connId)
 	binary.BigEndian.PutUint32(announceMsg[8:12], uint32(AnnounceAction))
 	binary.BigEndian.PutUint32(announceMsg[12:16], params.TransactionID)
 	copy(announceMsg[16:36], params.InfoHash[:])
@@ -137,7 +137,6 @@ func (m *PeerManager2) getPeersFromUDP(params *GetPeersFromUDPParams) error {
 	//seeders := binary.BigEndian.Uint32(resp[16:20])
 
 	for i := 20; i < len(resp); i += 6 {
-		fmt.Println(resp[i : i+4])
 		peer := peer.Peer{IP: net.IP((resp[i : i+4])), Port: binary.BigEndian.Uint16(resp[i+4 : i+6]), Bitfield: &bitfield.Bitfield{}}
 
 		_, ok := m.Peers[peer.GetID()]

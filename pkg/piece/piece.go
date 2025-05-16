@@ -59,8 +59,8 @@ func (r *Piece) ParsePiece(msg *peerMessage.PeerMessage) (int, error) {
 	if len(msg.Payload) < 8 {
 		return 0, fmt.Errorf("Payload too short. %d < 8", len(msg.Payload))
 	}
-	parsedIndex := int(binary.BigEndian.Uint32(msg.Payload[0:4]))
-	if parsedIndex != r.Idx {
+	parsedIndex := binary.BigEndian.Uint32(msg.Payload[0:4])
+	if parsedIndex != uint32(r.Idx) {
 		return 0, fmt.Errorf("Expected index %d, got %d", r.Idx, parsedIndex)
 	}
 	begin := int(binary.BigEndian.Uint32(msg.Payload[4:8]))
