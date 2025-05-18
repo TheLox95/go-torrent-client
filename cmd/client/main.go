@@ -114,10 +114,11 @@ func main() {
 	info := &bto.Info
 
 	//torrentPath := "./nasa2.torrent"
-	//torrentPath := "./debian.torrent"
-	torrentPath := "./mint.torrent"
+	torrentPath := "./debian.torrent"
+	//torrentPath := "./mint.torrent"
 	if delve.RunningWithDelve() {
-		torrentPath = "../../mint.torrent"
+		//torrentPath = "../../mint.torrent"
+		torrentPath = "../../debian.torrent"
 	}
 
 	file, err := os.Open(torrentPath)
@@ -178,8 +179,10 @@ func main() {
 		PeerManager: &peerManager2,
 		Client:      identifier,
 		FileManager: &filemanager.FileManager{
-			Filename: bto.Info.Name,
+			Filename:      bto.Info.Name,
+			BasePieceSize: bto.Info.PieceLength,
 		},
+		MaxParallelDownload: 100,
 	}
 	fileBuffer := manager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
 
@@ -199,7 +202,7 @@ func main() {
 
 	//fileBuffer := peerManager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
 
-	outFile, err := os.Create("./debian.iso")
+	outFile, err := os.Create("./" + bto.Info.Name)
 	if err != nil {
 		fmt.Println("could not create file", err)
 		os.Exit(1)

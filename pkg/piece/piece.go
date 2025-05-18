@@ -20,8 +20,8 @@ type Piece struct {
 	Length int
 }
 
-func (p *Piece) CalculateBounds(torrentLength int) (begin int, end int) {
-	begin = p.Idx * p.Length
+func (p *Piece) CalculateBounds(torrentLength, basePieceLen int) (begin int, end int) {
+	begin = p.Idx * basePieceLen
 	end = begin + p.Length
 	if end > torrentLength {
 		end = torrentLength
@@ -29,8 +29,8 @@ func (p *Piece) CalculateBounds(torrentLength int) (begin int, end int) {
 	return begin, end
 }
 
-func (p *Piece) CalculateSize(torrentLength int) (size int) {
-	begin, end := p.CalculateBounds(torrentLength)
+func (p *Piece) CalculateSize(torrentLength, basePieceLen int) (size int) {
+	begin, end := p.CalculateBounds(torrentLength, basePieceLen)
 	return end - begin
 }
 

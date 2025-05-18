@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -237,6 +238,9 @@ func (m *PeerManager2) GetPeer() *peer.Peer {
 	if len(m.availablePeers) == 0 {
 		return nil
 	}
+	sort.Slice(m.availablePeers, func(i, j int) bool {
+		return m.availablePeers[i].PiecesDownloaded > m.availablePeers[j].PiecesDownloaded
+	})
 	peer := m.availablePeers[0]
 	m.availablePeers = m.availablePeers[1:]
 	return peer
@@ -262,7 +266,7 @@ func (m *PeerManager2) PoolTrackers(params *GetPeersFromUDPParams) {
 				params.Url = url
 				fn(params)
 			}
-			time.Sleep(time.Second * 10)
+			time.Sleep(time.Second * 20)
 		}
 	}()
 }

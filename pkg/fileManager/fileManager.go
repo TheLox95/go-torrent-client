@@ -20,6 +20,7 @@ var downloadPath = filepath.Join(CWD, downloadFolder)
 
 type FileManager struct {
 	Filename         string
+	BasePieceSize    int
 	metaFile         *os.File
 	piecesDownloaded []int
 }
@@ -69,7 +70,7 @@ func (m *FileManager) AddToFile(p *piece.Piece) {
 	defer file.Close()
 
 	// Seek to the correct position based on the piece index
-	_, err = file.Seek(int64(p.Idx*p.Length), io.SeekCurrent)
+	_, err = file.Seek(int64(p.Idx*m.BasePieceSize), io.SeekStart)
 	if err != nil {
 		fmt.Println("Error seeking to position:", err)
 		return

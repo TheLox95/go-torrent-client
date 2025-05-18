@@ -20,15 +20,19 @@ type PeerManager interface {
 	GetPeer() *peer.Peer
 	AddPeer(p *peer.Peer)
 	AvailablePeers() int
+	TestValues() []*peer.Peer
 }
 
 type DownloadManager struct {
-	PeerManager     PeerManager
-	PiecePool       chan *piece.Piece
-	piecesCompleted int
-	Client          *(clientidentifier.ClientIdentifier)
-	FileManager     *(filemanager.FileManager)
-	totalPieces     int
+	PeerManager           PeerManager
+	PiecePool             chan *piece.Piece
+	piecesCompletedAmount int
+	piecesCompleted       []*piece.Piece
+	Client                *(clientidentifier.ClientIdentifier)
+	FileManager           *(filemanager.FileManager)
+	totalPieces           int
+	MaxParallelDownload   int
+	activeDownloads       int
 }
 
 func (m *DownloadManager) Download(pieceLength int, fileLength int, hashes [][20]byte) []byte {
@@ -38,25 +42,29 @@ func (m *DownloadManager) Download(pieceLength int, fileLength int, hashes [][20
 		if m.FileManager.PieceAlreadyDownloaded(&i) == false {
 			pieceLen := pieceLength
 			if i == m.totalPieces-1 {
-				pieceLen = fileLength - ( pieceLength*(m.totalPieces-1) )
+				pieceLen = fileLength - (pieceLength * (m.totalPieces - 1))
+			}
+			if pieceLen < pieceLength {
+				fmt.Println(i, m.totalPieces, pieceLen)
 			}
 			p := piece.Piece{Idx: i, Hash: hash, Length: pieceLen, Buf: nil}
 			m.PiecePool <- &p
 		} else {
-			m.piecesCompleted++
+			m.piecesCompletedAmount++
 		}
 	}
 
 	for pw := range m.PiecePool {
-		if m.piecesCompleted > 310 {
-			break
-		}
-		if m.piecesCompleted == m.totalPieces {
+		//if m.activeDownloads >= m.MaxParallelDownload {
+		//	m.PiecePool <- pw
+		//}
+		if m.piecesCompletedAmount == m.totalPieces {
 			break
 		}
 		p := m.PeerManager.GetPeer()
-		if p == nil {
-			m.PiecePool <- pw
+		//FIX: sometimes Bitfield is empty, should not be like that never
+		for p == nil || p.Bitfield.Len() == 0 {
+			p = m.PeerManager.GetPeer()
 			continue
 		}
 		if p.Bitfield.HasPiece(pw.Idx) == false {
@@ -65,7 +73,7 @@ func (m *DownloadManager) Download(pieceLength int, fileLength int, hashes [][20
 			continue
 		}
 
-		fmt.Println("@@@@@@@@@@@@@@@@@@@@@@ COMPLETED SO FAR", m.piecesCompleted, " out of ", m.totalPieces, " with ", m.PeerManager.AvailablePeers(), " peers available")
+		fmt.Println("@@@@@@@@@@@@@@@@@@@@@@ COMPLETED SO FAR", m.piecesCompletedAmount, " out of ", m.totalPieces, " with ", m.PeerManager.AvailablePeers(), " peers available")
 		if p.IsConnected() == false {
 			err := p.Connect(m.Client)
 			if err != nil {
@@ -76,19 +84,28 @@ func (m *DownloadManager) Download(pieceLength int, fileLength int, hashes [][20
 			}
 		}
 		unit := &downloadunit.DownloadUnit{Peer: p, Piece: pw, Status: downloadunit.Failed}
-		go m.askPiece(unit, fileLength)
+		go m.askPiece(unit, fileLength, pieceLength)
 	}
 
-	//close(m.PiecePool)
+	close(m.PiecePool)
 	buf := make([]byte, fileLength)
+	for i := 0; i < len(m.piecesCompleted); i++ {
+		piece := m.piecesCompleted[i]
+
+		begin, _ := piece.CalculateBounds(fileLength, pieceLength)
+		//copy(buf[piece.Idx*pieceLength:], piece.Buf)
+		copy(buf[begin:], piece.Buf)
+	}
 	return buf
 }
 
-func (m *DownloadManager) askPiece(unit *downloadunit.DownloadUnit, fileLength int) error {
-	pieceSize := unit.Piece.CalculateSize(fileLength)
+func (m *DownloadManager) askPiece(unit *downloadunit.DownloadUnit, fileLength, pieceLength int) error {
+	pieceSize := unit.Piece.CalculateSize(fileLength, pieceLength)
 
 	fmt.Printf("asking piece %d to peer %s of size %d\n", unit.Piece.Idx, unit.Peer.GetID(), pieceSize)
+	m.activeDownloads++
 	err := unit.Peer.RequestPiece(unit.Piece)
+	m.activeDownloads--
 	m.PeerManager.AddPeer(unit.Peer)
 	if err != nil {
 		fmt.Printf(Red+"PIECE_ID [%d] RequestPiece failed for IP %s with: %v\n"+Reset, unit.Piece.Idx, unit.Peer.IP.String(), err)
@@ -105,15 +122,16 @@ func (m *DownloadManager) askPiece(unit *downloadunit.DownloadUnit, fileLength i
 		unit.Peer.PiecesAsked = 0
 		fmt.Printf(Green+"putting pice [%d] back\n"+Reset, unit.Piece.Idx)
 		m.PiecePool <- unit.Piece
-		fmt.Println(unit.Piece.Idx, " ::piece is corrupted")
 		return errors.New("piece is corrupted")
 	}
 	unit.Peer.OnPieceRequestSucceed(unit.Piece.Idx)
 	unit.Status = downloadunit.Success
 	unit.Peer.PiecesAsked = 0
-	m.piecesCompleted++
+	unit.Peer.PiecesDownloaded++
+	m.piecesCompletedAmount++
 	m.FileManager.AddToFile(unit.Piece)
-	if m.piecesCompleted == m.totalPieces {
+	m.piecesCompleted = append(m.piecesCompleted, unit.Piece)
+	if m.piecesCompletedAmount == m.totalPieces {
 		m.PiecePool <- unit.Piece
 	}
 	return nil

@@ -3,6 +3,10 @@ package bitfield
 // A Bitfield represents the pieces that a peer has
 type Bitfield []byte
 
+func (bf Bitfield) Len() int {
+	return len(bf)
+}
+
 // HasPiece tells if a bitfield has a particular index set
 func (bf Bitfield) HasPiece(index int) bool {
 	byteIndex := index / 8

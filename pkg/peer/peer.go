@@ -180,7 +180,6 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 
 	totalDownloaded := 0
 	requested := 0
-	blockSize := piece.CalculateBlockSize(requested)
 
 	if p.conn == nil {
 		return errors.New("disconnected user")
@@ -197,6 +196,7 @@ func (p *Peer) RequestPiece(piece *piece.Piece) error {
 			piecePayload := make([]byte, 12)
 			binary.BigEndian.PutUint32(piecePayload[0:4], uint32(piece.Idx))
 			binary.BigEndian.PutUint32(piecePayload[4:8], uint32(requested))
+			blockSize := piece.CalculateBlockSize(requested)
 			binary.BigEndian.PutUint32(piecePayload[8:12], uint32(blockSize))
 
 			response, err := peerMessage.SendMessage(p.conn, peerMessage.MsgRequest, piecePayload)
