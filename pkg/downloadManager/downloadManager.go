@@ -20,7 +20,6 @@ type PeerManager interface {
 	GetPeer() *peer.Peer
 	AddPeer(p *peer.Peer)
 	AvailablePeers() int
-	TestValues() []*peer.Peer
 }
 
 type DownloadManager struct {

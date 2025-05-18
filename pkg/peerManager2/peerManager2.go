@@ -73,7 +73,6 @@ func (m *PeerManager2) getPeersFromUDP(params *GetPeersFromUDPParams) error {
 	binary.BigEndian.PutUint32(connBody[12:16], params.TransactionID) // Transaction ID
 
 	conn.SetDeadline(time.Now().Add(time.Second * 3))
-	defer conn.SetDeadline(time.Time{}) // clear deadlines
 
 	_, err = conn.Write(connBody)
 	if err != nil {
@@ -92,7 +91,8 @@ func (m *PeerManager2) getPeersFromUDP(params *GetPeersFromUDPParams) error {
 	action := binary.BigEndian.Uint32(announceBody[0:4])
 	transactionId := binary.BigEndian.Uint32(announceBody[4:8])
 	connId := binary.BigEndian.Uint64(announceBody[8:])
-	fmt.Println(action, transactionId, connId)
+	_, _ = action, transactionId
+	//fmt.Println(action, transactionId, connId)
 
 	announceMsg := make([]byte, 98)
 
@@ -131,7 +131,7 @@ func (m *PeerManager2) getPeersFromUDP(params *GetPeersFromUDPParams) error {
 	}
 	resp = resp[:n]
 
-	action = binary.BigEndian.Uint32(resp[0:4])
+	//action = binary.BigEndian.Uint32(resp[0:4])
 	//secondTransactionId := binary.BigEndian.Uint32(resp[4:8])
 	//interval := binary.BigEndian.Uint32(resp[8:12])
 	//leachers := binary.BigEndian.Uint32(resp[12:16])

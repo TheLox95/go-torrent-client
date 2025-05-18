@@ -111,14 +111,14 @@ var transactionID = mathRand.Uint32()
 func main() {
 	bto := bencodetorrent.BencodeTorrent{}
 	var buf bytes.Buffer
-	info := &bto.Info
 
 	//torrentPath := "./nasa2.torrent"
-	torrentPath := "./debian.torrent"
+	//torrentPath := "./debian.torrent"
 	//torrentPath := "./mint.torrent"
+	torrentPath := "./music.torrent"
 	if delve.RunningWithDelve() {
 		//torrentPath = "../../mint.torrent"
-		torrentPath = "../../debian.torrent"
+		torrentPath = "../../music.torrent"
 	}
 
 	file, err := os.Open(torrentPath)
@@ -134,7 +134,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = bencode.Marshal(&buf, *info)
+	err = bencode.Marshal(&buf, bto.RawInfo)
 	if err != nil {
 		fmt.Println("Could not Marshal encodeInfo")
 		os.Exit(1)
