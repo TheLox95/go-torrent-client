@@ -92,7 +92,6 @@ func (m *PeerManager2) getPeersFromUDP(params *GetPeersFromUDPParams) error {
 	transactionId := binary.BigEndian.Uint32(announceBody[4:8])
 	connId := binary.BigEndian.Uint64(announceBody[8:])
 	_, _ = action, transactionId
-	//fmt.Println(action, transactionId, connId)
 
 	announceMsg := make([]byte, 98)
 
@@ -159,6 +158,7 @@ func (m *PeerManager2) getPeersFromHttp(params *GetPeersFromUDPParams) error {
 
 	Port := 6881
 
+	fmt.Println("Default format:\n", params.InfoHash)
 	announceParams := url.Values{
 		"info_hash":  []string{string(params.InfoHash[:])},
 		"peer_id":    []string{string(params.PeerID[:])},
@@ -262,9 +262,11 @@ func (m *PeerManager2) PoolTrackers(params *GetPeersFromUDPParams) {
 		for {
 			for i := range len(m.Urls) {
 				url := m.Urls[i]
-				fn, _ := m.ResolvePeerFetching(url)
-				params.Url = url
-				fn(params)
+				fn, err := m.ResolvePeerFetching(url)
+				if err == nil {
+					params.Url = url
+					fn(params)
+				}
 			}
 			time.Sleep(time.Second * 20)
 		}

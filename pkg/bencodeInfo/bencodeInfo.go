@@ -2,11 +2,17 @@ package bencodeinfo
 
 import "fmt"
 
+type File struct {
+	Length int      `bencode:"length"`
+	Path   []string `bencode:"path"`
+}
+
 type BencodeInfo struct {
 	Pieces      string `bencode:"pieces"`
 	PieceLength int    `bencode:"piece length"`
-	Length      int    `bencode:"length"`
+	Length      int    `bencode:"length,omitempty"`
 	Name        string `bencode:"name"`
+	Files       []File `bencode:"files,omitempty"`
 }
 
 func (i *BencodeInfo) SplitPieceHashes() ([][20]byte, error) {

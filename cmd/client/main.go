@@ -60,7 +60,6 @@ func getPeerList(bto *bencodetorrent.BencodeTorrent) (peers []peer.Peer, infoHas
 	}
 
 	infoHash = sha1.Sum(buf.Bytes())
-
 	Port := 6881
 
 	params := url.Values{
@@ -112,10 +111,11 @@ func main() {
 	bto := bencodetorrent.BencodeTorrent{}
 	var buf bytes.Buffer
 
-	//torrentPath := "./nasa2.torrent"
+	//torrentPath := "./nasa.torrent"
 	//torrentPath := "./debian.torrent"
 	//torrentPath := "./mint.torrent"
-	torrentPath := "./music.torrent"
+	//torrentPath := "./music.torrent"
+	torrentPath := "./sintel.torrent"
 	if delve.RunningWithDelve() {
 		//torrentPath = "../../mint.torrent"
 		torrentPath = "../../music.torrent"
@@ -134,7 +134,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = bencode.Marshal(&buf, bto.RawInfo)
+	err = bencode.Marshal(&buf, bto.Info)
 	if err != nil {
 		fmt.Println("Could not Marshal encodeInfo")
 		os.Exit(1)
@@ -184,7 +184,21 @@ func main() {
 		},
 		MaxParallelDownload: 100,
 	}
-	fileBuffer := manager.Download(bto.Info.PieceLength, bto.Info.Length, hashes)
+	fileLength := bto.Info.Length
+	if bto.Info.Length == 0 && len(bto.Info.Files) != 0 {
+		total := 0
+		for p := 0; p < len(bto.Info.Files); p++ {
+			file := bto.Info.Files[p]
+			total = total + file.Length
+		}
+		fileLength = total
+	} else {
+		fmt.Println("could obtain file length", err)
+		os.Exit(1)
+
+	}
+
+	fileBuffer := manager.Download(bto.Info.PieceLength, fileLength, hashes)
 
 	//peers := slices.Collect(maps.Values(peerManager2.Peers))
 	//peers, _ := getPeerList(&bto)
